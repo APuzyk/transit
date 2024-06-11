@@ -1,4 +1,8 @@
-# How to run
+# Transit Rust
+Given a yaml configuration file (eventually) will print out a list of stops as well as
+the expected wait times.
+
+In addition we have colored the expected arrival times to be blue for normal lines and red for express buses.
 
 
 
@@ -12,3 +16,8 @@
 * Need to get some better error handling in here
 * Split up the functions a bit this thing is ugly as sin
 * Do we need unused vars?  E.g stop point ref and destination display?
+
+## Display Work
+* Let's first get the raspberry pi stood up and see what that's like
+* Then take a look at the ada fruit items to figure out how to best connect everything together
+* 
