@@ -1,11 +1,8 @@
+use chrono::DateTime;
+use chrono::Local;
 use reqwest::Client;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::{thread, time};
-use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney};
-use colored::Colorize;
-use derive_more::Display;
-use superconsole::components::Blank;
 use superconsole::components::Component;
 use superconsole::components::DrawMode;
 use superconsole::style::style;
@@ -14,45 +11,86 @@ use superconsole::style::Stylize;
 use superconsole::Dimensions;
 use superconsole::Line;
 use superconsole::Lines;
-use superconsole::Span;
 use superconsole::SuperConsole;
-use chrono::Local;
+use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney};
 
 const RAPID_LINE_TO_PARENT_MAP: [(&str, &str); 2] = [("14R", "14"), ("8BX", "8")];
 
 struct DisplayBoard {
-    display_lines: HashMap<String, Vec<MonitoredVehicleJourney>>
+    display_lines: Option<HashMap<String, Vec<MonitoredVehicleJourney>>>,
+    last_successful_request_time: Option<DateTime<Local>>,
+    last_request_successful: bool,
 }
 
 impl Component for DisplayBoard {
     fn draw_unchecked(&self, _dimensions: Dimensions, _mode: DrawMode) -> anyhow::Result<Lines> {
+        let mut lines = Vec::new();
+
+        if let Some(request_time) = self.last_successful_request_time {
+            lines.push(Line::from_iter(vec![
+                style("Last Updated: ".to_owned()).try_into()?,
+                style(request_time.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .bold()
+                    .try_into()?,
+            ]));
+        } else {
+            lines.push(Line::from_iter(vec![style("No Information".to_owned()).with(Color::Red).try_into()?]))
+        }
+        let display_lines = match &self.display_lines {
+            Some(dl) => dl,
+            None => return Ok(Lines(lines)),
+        };
+        
         let mut sorted_keys = Vec::new();
-        for key in self.display_lines.keys() {
+        for key in display_lines.keys() {
             sorted_keys.push(key.clone());
         }
         sorted_keys.sort();
-        let mut lines = Vec::new();
-        let date = Local::now();
-        lines.push(Line::from_iter(vec![style(date.format("%Y-%m-%d %H:%M").to_string()).bold().try_into()?]));
+        
+
         for key in sorted_keys {
             let mut this_vec = Vec::new();
-            this_vec.push(style(key.clone()).bold().try_into()?);
-            this_vec.push(style(" ".to_owned()).try_into()?);
-            for mvj in &self.display_lines[&key] {
+            if key != "43" {
+                this_vec.push(style(key.clone()).bold().try_into()?);
+            } else {
+                this_vec.push(style(key.clone()).bold().with(Color::Magenta).try_into()?);
+            }
+            let mut line_end = ":".to_owned();
+            for _ in 0..(4 - key.chars().count()) {
+                line_end.push_str(" ");
+            }
+            this_vec.push(style(line_end).bold().try_into()?);
+            for mvj in &display_lines[&key] {
                 match mvj.time_to_arrival() {
                     Some(tta) => {
-                        if mvj.line_ref != key{
-                            this_vec.push(style(tta.to_string()).with(Color::Red).try_into()?);
+                        if mvj.line_ref != key {
                             if mvj.has_location() {
-                                this_vec.push(style("*".to_owned()).with(Color::Red).try_into()?);
+                                this_vec.push(
+                                    style(tta.to_string()).with(Color::Red).bold().try_into()?,
+                                );
+                            } else {
+                                this_vec.push(
+                                    style(tta.to_string())
+                                        .with(Color::Red)
+                                        .italic()
+                                        .try_into()?,
+                                );
                             }
                         } else {
-                            this_vec.push(style(tta.to_string()).with(Color::Blue).try_into()?);
                             if mvj.has_location() {
-                                this_vec.push(style("*".to_owned()).with(Color::Blue).try_into()?);
+                                this_vec.push(
+                                    style(tta.to_string()).with(Color::Blue).bold().try_into()?,
+                                );
+                            } else {
+                                this_vec.push(
+                                    style(tta.to_string())
+                                        .with(Color::Blue)
+                                        .italic()
+                                        .try_into()?,
+                                );
                             }
                         }
-                    },
+                    }
                     None => (),
                 }
                 this_vec.push(style(" ".to_owned()).try_into()?);
@@ -60,8 +98,6 @@ impl Component for DisplayBoard {
             lines.push(Line::from_iter(this_vec));
         }
         Ok(Lines(lines))
-
-
     }
 }
 
@@ -73,12 +109,25 @@ async fn main() {
     for (rapid, parent) in RAPID_LINE_TO_PARENT_MAP {
         rapid_to_line_map.insert(rapid.to_owned(), parent.to_owned());
     }
-
+    // TODO: Update to use mutable display board so we can display and handle errors effectively
+    //   while still showing the latest information.
+    let mut display_board = DisplayBoard {
+        display_lines: None,
+        last_successful_request_time: None,
+        last_request_successful: false,
+    };
     loop {
+        let stops = match get_stops(&client).await {
+            Ok(stops) => stops,
+            Err(e) => {
+                println!("{:?}", e);
+                display_board.last_request_successful = false;
+                continue;
+            }
+        };
+
         let mut display: HashMap<String, Vec<MonitoredVehicleJourney>> = HashMap::new();
-        let stops = get_stops(&client).await;
         for (key, value) in stops.into_iter() {
-            // print!("{}: ", key.screen_display());
             let parent_line = match rapid_to_line_map.get(&key.line_ref) {
                 Some(parent_line) => (*parent_line).clone(),
                 None => {
@@ -98,7 +147,11 @@ async fn main() {
             // println!("");
         }
         let mut sorted_keys = Vec::new();
-        for key in display.keys() {
+        // display.into_iter().map(|(key, _)| {
+        //     sorted_keys.push(key.clone());
+        // });
+        let display_keys = display.keys().clone();
+        for key in display_keys {
             sorted_keys.push(key.clone());
         }
         sorted_keys.sort();
@@ -109,14 +162,10 @@ async fn main() {
                 None => 999,
             });
         }
-        let display_board = DisplayBoard {
-            display_lines: display
-        };
-        console
-            .render(&display_board)
-            .unwrap();
-
-
+        display_board.display_lines = Some(display);
+        display_board.last_successful_request_time = Some(Local::now());
+        display_board.last_request_successful = true;
+        console.render(&display_board).unwrap();
 
         thread::sleep(time::Duration::from_secs(30));
     }

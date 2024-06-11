@@ -76,10 +76,12 @@ impl LineStop {
     }
 }
 
-pub async fn get_stops(client: &Client) -> HashMap<LineStop, Vec<MonitoredVehicleJourney>> {
+pub async fn get_stops(
+    client: &Client,
+) -> Result<HashMap<LineStop, Vec<MonitoredVehicleJourney>>, reqwest::Error> {
     let mut hm: HashMap<LineStop, Vec<MonitoredVehicleJourney>> = HashMap::new();
     for stop_id in STOPS_TO_MONITOR {
-        let stop_monitor_data = get_stop_monitor_request(client, stop_id).await.unwrap();
+        let stop_monitor_data = get_stop_monitor_request(client, stop_id).await?;
         let monitored_vehicle_journeys = extract_monitored_vehicle_journeys(stop_monitor_data);
         for mvj in monitored_vehicle_journeys {
             let line = LineStop {
@@ -96,7 +98,7 @@ pub async fn get_stops(client: &Client) -> HashMap<LineStop, Vec<MonitoredVehicl
             }
         }
     }
-    return hm;
+    return Ok(hm);
 }
 
 fn extract_monitored_vehicle_journeys(stop_monitor_data: Value) -> Vec<MonitoredVehicleJourney> {
@@ -146,6 +148,7 @@ fn extract_monitored_vehicle_journeys(stop_monitor_data: Value) -> Vec<Monitored
     }
     return monitored_vehicle_journeys;
 }
+
 async fn get_stop_monitor_request(client: &Client, stop_id: &str) -> Result<Value, reqwest::Error> {
     let token = env::var("TRANSIT_TOKEN").unwrap();
     let url: String = "https://api.511.org/transit/StopMonitoring?api_key=".to_owned()
