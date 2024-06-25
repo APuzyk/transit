@@ -13,6 +13,9 @@ use superconsole::Line;
 use superconsole::Lines;
 use superconsole::SuperConsole;
 use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney};
+use crossterm::{execute, terminal::{EnterAlternateScreen}};
+use std::io;
+
 
 const RAPID_LINE_TO_PARENT_MAP: [(&str, &str); 2] = [("14R", "14"), ("8BX", "8")];
 
@@ -102,7 +105,8 @@ impl Component for DisplayBoard {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> io::Result<()> {
+    execute!(io::stdout(), EnterAlternateScreen)?;
     let mut console = SuperConsole::new().unwrap();
     let client = Client::new();
     let mut rapid_to_line_map: HashMap<String, String> = HashMap::new();
