@@ -18,6 +18,28 @@ In addition we have colored the expected arrival times to be blue for normal lin
 * Do we need unused vars?  E.g stop point ref and destination display?
 
 ## Display Work
-* Let's first get the raspberry pi stood up and see what that's like
-* Then take a look at the ada fruit items to figure out how to best connect everything together
-* 
+
+### Steps
+* ~~Write v1 of the arrival time ui~~
+* Set up Raspberry Pi
+ * ~~Flash microsd card~~
+ * Spin up raspberry pi and set up ssh
+ * write down static IPs and the like
+* Set up Matrix Display
+ * Solder on hat
+ * Set up martrix in array
+ * Test v1 display
+ * see if we need to use ratatui or some other terminal ui library to make this look better
+* Sync with Laurel on display and how to update
+
+### Documents
+* [Main article on raspberry pi with led displays](https://learn.adafruit.com/raspberry-pi-led-matrix-display/overview)
+* [Raspberry pi hat overview](https://learn.adafruit.com/adafruit-rgb-matrix-plus-real-time-clock-hat-for-raspberry-pi)
+* [led matrix basics overview](https://learn.adafruit.com/32x16-32x32-rgb-led-matrix/overview)
+* [Raspberry pi getting started](https://www.raspberrypi.com/documentation/computers/getting-started.html)
+
+### My Stuff
+* Raspberry Pi 3 B+
+
+### Need to get
+1. Powersource
