@@ -13,7 +13,7 @@ use superconsole::Line;
 use superconsole::Lines;
 use superconsole::SuperConsole;
 use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney};
-use crossterm::{execute, terminal::{EnterAlternateScreen}};
+use crossterm::{execute, terminal::{Clear, ClearType, EnterAlternateScreen}};
 use std::io;
 
 
@@ -113,8 +113,7 @@ async fn main() -> io::Result<()> {
     for (rapid, parent) in RAPID_LINE_TO_PARENT_MAP {
         rapid_to_line_map.insert(rapid.to_owned(), parent.to_owned());
     }
-    // TODO: Update to use mutable display board so we can display and handle errors effectively
-    //   while still showing the latest information.
+
     let mut display_board = DisplayBoard {
         display_lines: None,
         last_successful_request_time: None,
@@ -123,9 +122,11 @@ async fn main() -> io::Result<()> {
     loop {
         let stops = match get_stops(&client).await {
             Ok(stops) => stops,
-            Err(e) => {
-                println!("{:?}", e);
+            Err(_) => {
                 display_board.last_request_successful = false;
+                execute!(io::stdout(), Clear(ClearType::All))?;
+                console.render(&display_board).unwrap();
+                thread::sleep(time::Duration::from_secs(10));
                 continue;
             }
         };
@@ -148,12 +149,9 @@ async fn main() -> io::Result<()> {
                     }
                 }
             }
-            // println!("");
         }
         let mut sorted_keys = Vec::new();
-        // display.into_iter().map(|(key, _)| {
-        //     sorted_keys.push(key.clone());
-        // });
+
         let display_keys = display.keys().clone();
         for key in display_keys {
             sorted_keys.push(key.clone());
@@ -169,8 +167,9 @@ async fn main() -> io::Result<()> {
         display_board.display_lines = Some(display);
         display_board.last_successful_request_time = Some(Local::now());
         display_board.last_request_successful = true;
+        execute!(io::stdout(), Clear(ClearType::All))?;
         console.render(&display_board).unwrap();
-
+        
         thread::sleep(time::Duration::from_secs(30));
     }
 }
