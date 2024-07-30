@@ -1,7 +1,12 @@
 use chrono::DateTime;
 use chrono::Local;
+use crossterm::{
+    execute,
+    terminal::{Clear, ClearType, EnterAlternateScreen},
+};
 use reqwest::Client;
 use std::collections::HashMap;
+use std::io;
 use std::{thread, time};
 use superconsole::components::Component;
 use superconsole::components::DrawMode;
@@ -12,12 +17,7 @@ use superconsole::Dimensions;
 use superconsole::Line;
 use superconsole::Lines;
 use superconsole::SuperConsole;
-use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney};
-use crossterm::{execute, terminal::{Clear, ClearType, EnterAlternateScreen}};
-use std::io;
-
-
-const RAPID_LINE_TO_PARENT_MAP: [(&str, &str); 2] = [("14R", "14"), ("8BX", "8")];
+use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney, LineStop};
 
 struct DisplayBoard {
     display_lines: Option<HashMap<String, Vec<MonitoredVehicleJourney>>>,
@@ -37,19 +37,20 @@ impl Component for DisplayBoard {
                     .try_into()?,
             ]));
         } else {
-            lines.push(Line::from_iter(vec![style("No Information".to_owned()).with(Color::Red).try_into()?]))
+            lines.push(Line::from_iter(vec![style("No Information".to_owned())
+                .with(Color::Red)
+                .try_into()?]))
         }
         let display_lines = match &self.display_lines {
             Some(dl) => dl,
             None => return Ok(Lines(lines)),
         };
-        
+
         let mut sorted_keys = Vec::new();
         for key in display_lines.keys() {
             sorted_keys.push(key.clone());
         }
         sorted_keys.sort();
-        
 
         for key in sorted_keys {
             let mut this_vec = Vec::new();
@@ -109,67 +110,74 @@ async fn main() -> io::Result<()> {
     execute!(io::stdout(), EnterAlternateScreen)?;
     let mut console = SuperConsole::new().unwrap();
     let client = Client::new();
-    let mut rapid_to_line_map: HashMap<String, String> = HashMap::new();
-    for (rapid, parent) in RAPID_LINE_TO_PARENT_MAP {
-        rapid_to_line_map.insert(rapid.to_owned(), parent.to_owned());
-    }
-
+    let rapid_line_to_parent_map: HashMap<String, String> = HashMap::from([
+        ("14R".to_string(), "14".to_string()),
+        ("8BX".to_string(), "8".to_string()),
+    ]);
     let mut display_board = DisplayBoard {
         display_lines: None,
         last_successful_request_time: None,
         last_request_successful: false,
     };
     loop {
-        let stops = match get_stops(&client).await {
-            Ok(stops) => stops,
-            Err(_) => {
-                display_board.last_request_successful = false;
-                execute!(io::stdout(), Clear(ClearType::All))?;
-                console.render(&display_board).unwrap();
-                thread::sleep(time::Duration::from_secs(10));
-                continue;
-            }
-        };
-
-        let mut display: HashMap<String, Vec<MonitoredVehicleJourney>> = HashMap::new();
-        for (key, value) in stops.into_iter() {
-            let parent_line = match rapid_to_line_map.get(&key.line_ref) {
-                Some(parent_line) => (*parent_line).clone(),
-                None => {
-                    let line_ref = key.line_ref.clone();
-                    line_ref
-                }
-            };
-            for mvj in value {
-                if let Some(_tta) = mvj.time_to_arrival() {
-                    if let Some(x) = display.get_mut(&parent_line) {
-                        x.push(mvj);
-                    } else {
-                        display.insert(parent_line.clone(), vec![mvj]);
-                    }
-                }
-            }
-        }
-        let mut sorted_keys = Vec::new();
-
-        let display_keys = display.keys().clone();
-        for key in display_keys {
-            sorted_keys.push(key.clone());
-        }
-        sorted_keys.sort();
-        for key in sorted_keys {
-            let value = display.get_mut(&key).unwrap();
-            value.sort_by_key(|a| match a.time_to_arrival() {
-                Some(v) => v,
-                None => 999,
-            });
-        }
-        display_board.display_lines = Some(display);
-        display_board.last_successful_request_time = Some(Local::now());
-        display_board.last_request_successful = true;
+        update_display_board(&mut display_board, &client, &rapid_line_to_parent_map).await;
         execute!(io::stdout(), Clear(ClearType::All))?;
         console.render(&display_board).unwrap();
-        
+
         thread::sleep(time::Duration::from_secs(30));
     }
+}
+
+async fn update_display_board(
+    display_board: &mut DisplayBoard,
+    client: &Client,
+    rapid_line_to_parent_map: &HashMap<String, String>,
+) {
+    if let Ok(stops) = get_stops(client).await {
+        (*display_board).display_lines = Some(get_display_lines(stops, rapid_line_to_parent_map));
+        (*display_board).last_successful_request_time = Some(Local::now());
+        (*display_board).last_request_successful = true;
+    } else {
+        (*display_board).last_request_successful = false;
+    }
+}
+
+fn get_display_lines(
+    stops: HashMap<LineStop, Vec<MonitoredVehicleJourney>>,
+    rapid_line_to_parent_map: &HashMap<String, String>,
+) -> HashMap<String, Vec<MonitoredVehicleJourney>> {
+    let mut display: HashMap<String, Vec<MonitoredVehicleJourney>> = HashMap::new();
+    for (key, value) in stops.into_iter() {
+        let parent_line = match rapid_line_to_parent_map.get(&key.line_ref) {
+            Some(parent_line) => (*parent_line).clone(),
+            None => {
+                let line_ref = key.line_ref.clone();
+                line_ref
+            }
+        };
+        for mvj in value {
+            if let Some(_tta) = mvj.time_to_arrival() {
+                if let Some(x) = display.get_mut(&parent_line) {
+                    x.push(mvj);
+                } else {
+                    display.insert(parent_line.clone(), vec![mvj]);
+                }
+            }
+        }
+    }
+    let mut sorted_keys = Vec::new();
+
+    let display_keys = display.keys().clone();
+    for key in display_keys {
+        sorted_keys.push(key.clone());
+    }
+    sorted_keys.sort();
+    for key in sorted_keys {
+        let value = display.get_mut(&key).unwrap();
+        value.sort_by_key(|a| match a.time_to_arrival() {
+            Some(v) => v,
+            None => 999,
+        });
+    }
+    return display
 }

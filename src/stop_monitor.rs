@@ -81,7 +81,7 @@ pub async fn get_stops(
 ) -> Result<HashMap<LineStop, Vec<MonitoredVehicleJourney>>, reqwest::Error> {
     let mut hm: HashMap<LineStop, Vec<MonitoredVehicleJourney>> = HashMap::new();
     for stop_id in STOPS_TO_MONITOR {
-        let stop_monitor_data = get_stop_monitor_request(client, stop_id).await?;
+        let stop_monitor_data: Value = get_stop_monitor_request(client, stop_id).await?;
         let monitored_vehicle_journeys = extract_monitored_vehicle_journeys(stop_monitor_data);
         for mvj in monitored_vehicle_journeys {
             let line = LineStop {
