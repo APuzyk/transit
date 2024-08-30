@@ -6,13 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
-
-const STOPS_TO_MONITOR: [&str; 3] = [
-    "15482", // NAPLES AND ROLPH SOUTH BOUND
-    // "14891", // GENEVA AND NAPLES EAST BOUND
-    "14890", // GENEVA AND NAPLES WEST BOUND
-    "15593", // GENEVA AND MISSION SOUTH BOUND
-];
+use crate::constants::STOPS_TO_MONITOR;
 
 #[derive(Deserialize, Debug)]
 pub struct MonitoredVehicleJourney {
@@ -155,7 +149,7 @@ async fn get_stop_monitor_request(client: &Client, stop_id: &str) -> Result<Valu
         + &token
         + "&agency=SF&stopCode="
         + stop_id;
-    let response = client.get(url).send().await.unwrap();
+    let response = client.get(url).send().await?;
 
     let response_body = response.error_for_status()?.text().await?;
     let data: Value = serde_json::from_str(response_body.as_str()).unwrap();

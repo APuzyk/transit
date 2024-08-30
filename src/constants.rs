@@ -1,0 +1,11 @@
+pub const STOPS_TO_MONITOR: [&str; 3] = [
+    "15482", // NAPLES AND ROLPH SOUTH BOUND
+    // "14891", // GENEVA AND NAPLES EAST BOUND
+    "14890", // GENEVA AND NAPLES WEST BOUND
+    "15593", // GENEVA AND MISSION SOUTH BOUND
+];
+
+pub const RAPID_LINE_TO_PARENT_LINE_MAP: [(&str, &str); 2] = [
+    ("14R", "14"),
+    ("8BX", "8"),
+];

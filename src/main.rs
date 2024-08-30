@@ -1,4 +1,3 @@
-use chrono::DateTime;
 use chrono::Local;
 use crossterm::{
     execute,
@@ -8,135 +7,44 @@ use reqwest::Client;
 use std::collections::HashMap;
 use std::io;
 use std::{thread, time};
-use superconsole::components::Component;
-use superconsole::components::DrawMode;
-use superconsole::style::style;
-use superconsole::style::Color;
-use superconsole::style::Stylize;
-use superconsole::Dimensions;
-use superconsole::Line;
-use superconsole::Lines;
 use superconsole::SuperConsole;
-use transit_rust::stop_monitor::{get_stops, MonitoredVehicleJourney, LineStop};
-
-struct DisplayBoard {
-    display_lines: Option<HashMap<String, Vec<MonitoredVehicleJourney>>>,
-    last_successful_request_time: Option<DateTime<Local>>,
-    last_request_successful: bool,
-}
-
-impl Component for DisplayBoard {
-    fn draw_unchecked(&self, _dimensions: Dimensions, _mode: DrawMode) -> anyhow::Result<Lines> {
-        let mut lines = Vec::new();
-
-        if let Some(request_time) = self.last_successful_request_time {
-            lines.push(Line::from_iter(vec![
-                style("Last Updated: ".to_owned()).try_into()?,
-                style(request_time.format("%Y-%m-%d %H:%M:%S").to_string())
-                    .bold()
-                    .try_into()?,
-            ]));
-        } else {
-            lines.push(Line::from_iter(vec![style("No Information".to_owned())
-                .with(Color::Red)
-                .try_into()?]))
-        }
-        let display_lines = match &self.display_lines {
-            Some(dl) => dl,
-            None => return Ok(Lines(lines)),
-        };
-
-        let mut sorted_keys = Vec::new();
-        for key in display_lines.keys() {
-            sorted_keys.push(key.clone());
-        }
-        sorted_keys.sort();
-
-        for key in sorted_keys {
-            let mut this_vec = Vec::new();
-            if key != "43" {
-                this_vec.push(style(key.clone()).bold().try_into()?);
-            } else {
-                this_vec.push(style(key.clone()).bold().with(Color::Magenta).try_into()?);
-            }
-            let mut line_end = ":".to_owned();
-            for _ in 0..(4 - key.chars().count()) {
-                line_end.push_str(" ");
-            }
-            this_vec.push(style(line_end).bold().try_into()?);
-            for mvj in &display_lines[&key] {
-                match mvj.time_to_arrival() {
-                    Some(tta) => {
-                        if mvj.line_ref != key {
-                            if mvj.has_location() {
-                                this_vec.push(
-                                    style(tta.to_string()).with(Color::Red).bold().try_into()?,
-                                );
-                            } else {
-                                this_vec.push(
-                                    style(tta.to_string())
-                                        .with(Color::Red)
-                                        .italic()
-                                        .try_into()?,
-                                );
-                            }
-                        } else {
-                            if mvj.has_location() {
-                                this_vec.push(
-                                    style(tta.to_string()).with(Color::Blue).bold().try_into()?,
-                                );
-                            } else {
-                                this_vec.push(
-                                    style(tta.to_string())
-                                        .with(Color::Blue)
-                                        .italic()
-                                        .try_into()?,
-                                );
-                            }
-                        }
-                    }
-                    None => (),
-                }
-                this_vec.push(style(" ".to_owned()).try_into()?);
-            }
-            lines.push(Line::from_iter(this_vec));
-        }
-        Ok(Lines(lines))
-    }
-}
+use transit_rust::constants::RAPID_LINE_TO_PARENT_LINE_MAP;
+use transit_rust::display_board::DisplayBoard;
+use transit_rust::stop_monitor::{get_stops, LineStop, MonitoredVehicleJourney};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
     execute!(io::stdout(), EnterAlternateScreen)?;
     let mut console = SuperConsole::new().unwrap();
     let client = Client::new();
-    let rapid_line_to_parent_map: HashMap<String, String> = HashMap::from([
-        ("14R".to_string(), "14".to_string()),
-        ("8BX".to_string(), "8".to_string()),
-    ]);
-    let mut display_board = DisplayBoard {
-        display_lines: None,
-        last_successful_request_time: None,
-        last_request_successful: false,
-    };
+    let rapid_line_to_parent_map: HashMap<&str, &str> =
+        HashMap::from(RAPID_LINE_TO_PARENT_LINE_MAP);
+    let mut display_board = DisplayBoard::new();
     loop {
         update_display_board(&mut display_board, &client, &rapid_line_to_parent_map).await;
         execute!(io::stdout(), Clear(ClearType::All))?;
         console.render(&display_board).unwrap();
-
-        thread::sleep(time::Duration::from_secs(30));
+        if display_board.last_request_successful {
+            thread::sleep(time::Duration::from_secs(30));
+        } else {
+            thread::sleep(time::Duration::from_secs(2));
+        }
     }
 }
 
 async fn update_display_board(
     display_board: &mut DisplayBoard,
     client: &Client,
-    rapid_line_to_parent_map: &HashMap<String, String>,
+    rapid_line_to_parent_map: &HashMap<&str, &str>,
 ) {
     if let Ok(stops) = get_stops(client).await {
-        (*display_board).display_lines = Some(get_display_lines(stops, rapid_line_to_parent_map));
-        (*display_board).last_successful_request_time = Some(Local::now());
-        (*display_board).last_request_successful = true;
+        if let Ok(display_lines) = get_display_lines(stops, rapid_line_to_parent_map, Some(true)) {
+            (*display_board).display_lines = Some(display_lines);
+            (*display_board).last_successful_request_time = Some(Local::now());
+            (*display_board).last_request_successful = true;
+        } else {
+            (*display_board).last_request_successful = false;
+        }
     } else {
         (*display_board).last_request_successful = false;
     }
@@ -144,17 +52,24 @@ async fn update_display_board(
 
 fn get_display_lines(
     stops: HashMap<LineStop, Vec<MonitoredVehicleJourney>>,
-    rapid_line_to_parent_map: &HashMap<String, String>,
-) -> HashMap<String, Vec<MonitoredVehicleJourney>> {
+    rapid_line_to_parent_map: &HashMap<&str, &str>,
+    use_long_name: Option<bool>,
+) -> Result<HashMap<String, Vec<MonitoredVehicleJourney>>, reqwest::Error> {
     let mut display: HashMap<String, Vec<MonitoredVehicleJourney>> = HashMap::new();
-    for (key, value) in stops.into_iter() {
-        let parent_line = match rapid_line_to_parent_map.get(&key.line_ref) {
-            Some(parent_line) => (*parent_line).clone(),
-            None => {
-                let line_ref = key.line_ref.clone();
-                line_ref
-            }
+
+    for (line_stop, value) in stops.into_iter() {
+        // let parent_line = match rapid_line_to_parent_map.get(line_stop.line_ref.as_str()) {
+        //     Some(&parent_line) => line_stop.line_ref.clone(),//parent_line.to_string(),
+        //     None => line_stop.line_ref.clone(),
+        // };
+
+        let parent_line = match rapid_line_to_parent_map.get(line_stop.line_ref.as_str()) {
+            Some(&parent_line) => line_stop.screen_display(),
+            None => line_stop.screen_display(),
         };
+
+        //add new time to arrivals or create a new entry
+        //in display lines
         for mvj in value {
             if let Some(_tta) = mvj.time_to_arrival() {
                 if let Some(x) = display.get_mut(&parent_line) {
@@ -179,5 +94,5 @@ fn get_display_lines(
             None => 999,
         });
     }
-    return display
+    return Ok(display);
 }

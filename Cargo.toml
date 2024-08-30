@@ -16,3 +16,9 @@ superconsole = "0.2.0"
 anyhow = "1.0.75"
 derive_more = "0.99.17"
 crossterm = "0.27.0"
+libc= "0.2"
+
+[build-dependencies]
+bindgen = "0.59"
+cc = "1.0"
+
